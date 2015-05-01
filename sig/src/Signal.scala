@@ -24,6 +24,10 @@ class Signal[T](expr: => T) {
     //}
   }
 
+  def value() = {
+    myValue
+  }
+
   protected def update(expr: => T): Unit = {
     myExpr = () => expr
     computeValue()
@@ -45,7 +49,7 @@ object Var {
   def apply[T](expr: => T) = new Var(expr)
 }
 
-object NoSignal extends Signal[Nothing]((Nothing) => Nothing) {
+object NoSignal extends Signal[Nothing](???) {
   override def computeValue() = ()
 }
 

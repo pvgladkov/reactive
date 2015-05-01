@@ -3,11 +3,13 @@ object accounts {
     Signal(accts.map(_.balance()).sum)
   }
 
-
   val a = new BankAccount()
   val b = new BankAccount()
   val c = consolidated(List(a, b))
 
-  a deposit 4
-  println(c())
+  a.deposit(10)
+  c.value()
+  b.deposit(30)
+  c.value()
+
 }
