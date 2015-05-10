@@ -39,7 +39,7 @@ object Main {
     //    or the user enters some text and presses ENTER
     val terminationRequested: Future[String] = {
       val p = Promise[String]
-      Future.any(List(userInterrupted, timeOut)) onComplete {p.complete(_)}
+      Future.any(List(userInterrupted, timeOut)).onComplete(p.complete(_))
       p.future
     }
 
