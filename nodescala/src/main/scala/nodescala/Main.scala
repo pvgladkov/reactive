@@ -5,6 +5,7 @@ import scala.concurrent._
 import scala.concurrent.duration._
 import ExecutionContext.Implicits.global
 import scala.async.Async.{async, await}
+import scala.util.{Try, Success, Failure}
 
 object Main {
 
@@ -22,20 +23,33 @@ object Main {
       f => "You entered... " + f.now
     }
 
+    def timeOutIn(d: Duration): Future[String] = {
+      val p = Promise[String]
+      Future.delay(d) onComplete { case _ => p.success("Server timeout!")}
+      p.future
+    }
+
     // TO IMPLEMENT
     // 3. create a future that completes after 20 seconds
     //    and continues with a `"Server timeout!"` message
-    val timeOut: Future[String] = ???
+    val timeOut: Future[String] = timeOutIn(20 second)
 
     // TO IMPLEMENT
     // 4. create a future that completes when either 20 seconds elapse
     //    or the user enters some text and presses ENTER
-    val terminationRequested: Future[String] = ???
+    val terminationRequested: Future[String] = {
+      val p = Promise[String]
+      Future.any(List(userInterrupted, timeOut)) onComplete {p.complete(_)}
+      p.future
+    }
 
     // TO IMPLEMENT
     // 5. unsubscribe from the server
     terminationRequested onSuccess {
-      case msg => ???
+      case msg =>
+        println(msg)
+        println("bye")
+        myServerSubscription.unsubscribe()
     }
   }
 
