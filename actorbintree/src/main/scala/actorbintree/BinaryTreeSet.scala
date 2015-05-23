@@ -5,6 +5,7 @@ package actorbintree
 
 import akka.actor._
 import scala.collection.immutable.Queue
+import scala.concurrent.Promise
 
 object BinaryTreeSet {
 
@@ -50,7 +51,7 @@ object BinaryTreeSet {
 }
 
 
-class BinaryTreeSet extends Actor {
+class BinaryTreeSet extends Actor with Stash {
   import BinaryTreeSet._
   import BinaryTreeNode._
 
@@ -66,20 +67,34 @@ class BinaryTreeSet extends Actor {
 
   // optional
   /** Accepts `Operation` and `GC` messages. */
-  val normal: Receive = { case _ => ??? }
+  val normal: Receive = {
+    case operation: Operation => root ! operation
+    case GC => val newRoot = createRoot
+      root ! CopyTo(newRoot)
+      context.become(garbageCollecting(newRoot))
+  }
 
   // optional
   /** Handles messages while garbage collection is performed.
     * `newRoot` is the root of the new binary tree where we want to copy
     * all non-removed elements into.
     */
-  def garbageCollecting(newRoot: ActorRef): Receive = ???
+  def garbageCollecting(newRoot: ActorRef): Receive = {
+    case message: Operation => stash() //Leverage akka stash...
+    case CopyFinished => {
+      root ! PoisonPill
+      root = newRoot
+      context.become(normal)
+      unstashAll()
+    }
+  }
 
 }
 
 object BinaryTreeNode {
   trait Position
 
+  case object Middle extends Position
   case object Left extends Position
   case object Right extends Position
 
@@ -99,15 +114,58 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
   // optional
   def receive = normal
 
+  def branch(elem: Int): Position = if (this.elem == elem) Middle else if (this.elem < elem) Right else Left
+
+  def findBranch(op: Operation)(lastTree: Position => Unit) {
+    branch(op.elem) match {
+      case pos @ (Left | Right) if hasSubNode(pos) => subtrees(pos) ! op  //When next branch is available
+      case pos => lastTree(pos)                                             //When in the middle or next branch is not available, apply operation
+    }
+  }
+
+  def hasSubNode(sub: Position) = subtrees.contains(sub)
+
   // optional
   /** Handles `Operation` messages and `CopyTo` requests. */
-  val normal: Receive = { case _ => ??? }
+  val normal: Receive = {
+    case op @ Insert(requester, id, elem) => findBranch(op) {
+      pos => pos match {
+        case Middle => removed = false
+        case _ => subtrees += pos -> context.actorOf(BinaryTreeNode.props(elem, initiallyRemoved = false))
+      }
+        requester ! OperationFinished(id)
+    }
+    case op @ Contains(requester, id, elem) => findBranch(op) {
+      case Middle => requester ! ContainsResult(id, !removed)
+      case _ => requester ! ContainsResult(id, false)
+    }
+    case op @ Remove(requester, id, elem) => findBranch(op) {
+      pos => {
+        if (pos == Middle) removed = true
+        requester ! OperationFinished(id)
+      }
+    }
+    case CopyTo(newRoot) => {
+      if (!removed) newRoot ! Insert(self, elem, elem) //Use elem for id, as it's supposed to be distinct
+      subtrees.values.foreach(_ ! CopyTo(newRoot))
+      context.become(copying(subtrees.values.toSet, insertConfirmed=removed))
+    }
+  }
 
   // optional
   /** `expected` is the set of ActorRefs whose replies we are waiting for,
     * `insertConfirmed` tracks whether the copy of this node to the new tree has been confirmed.
     */
-  def copying(expected: Set[ActorRef], insertConfirmed: Boolean): Receive = ???
+  def copying(expected: Set[ActorRef], insertConfirmed: Boolean): Receive = {
+    if (expected.isEmpty && insertConfirmed) {
+      context.parent ! CopyFinished
+      normal
+    }
+    else {
+      case OperationFinished(id) => if (id == elem) context.become(copying(expected, insertConfirmed = true))
+      case CopyFinished => context.become(copying(expected - sender, insertConfirmed))
+    }
+  }
 
 
 }
